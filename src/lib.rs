@@ -92,15 +92,15 @@ where
 }
 
 impl HList for HNil {
-	type Tuple = HNil;
+	type Tuple = ();
 
 	#[inline]
 	fn flatten(self) -> Self::Tuple {
-		HNil
+		()
 	}
 }
 
-impl Tuple for HNil {
+impl Tuple for () {
 	type HList = HNil;
 
 	#[inline]
@@ -119,6 +119,7 @@ macro_rules! product {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! Product {
+	() => { $crate::HNil };
 	($H:ty) => { $crate::Product<$H, $crate::HNil> };
 	($H:ty, $($T:ty),*) => { $crate::Product<$H, $crate::Product!($($T),*)> };
 }
@@ -275,6 +276,7 @@ macro_rules! path {
 			}
 			#[allow(dead_code)]
 			pub(self) fn local(params: <<$crate::Product!($($bty),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple) -> impl $crate::Display {
+				#[allow(unused_variables)]
 				let params = $crate::ReverseInto::reverse_into($crate::Tuple::hlist(params), $crate::HNil);
 				$crate::path!(format [$crate::path!(@genformat $($format)*)] [] [] [$($bty),*] [params])
 			}
