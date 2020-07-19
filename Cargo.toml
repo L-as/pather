@@ -1,0 +1,9 @@
+[package]
+name = "pather"
+version = "0.1.0"
+authors = ["Las <las@protonmail.ch>"]
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+warp = { version = "0.2.3", optional = true }
