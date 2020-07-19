@@ -241,6 +241,20 @@ pub fn RootPath<'a>(_params: <<<RootPath<'a> as Path>::Params as ReverseInto<HNi
 	""
 }
 
+#[doc(hidden)]
+#[cfg(feature = "warp")]
+#[macro_export]
+macro_rules! if_warp {
+	($($x:tt)*) => ($($x)*)
+}
+
+#[doc(hidden)]
+#[cfg(not(feature = "warp"))]
+#[macro_export]
+macro_rules! if_warp {
+	($($x:tt)*) => {};
+}
+
 #[macro_export]
 macro_rules! path {
 	(@genformat $head:literal $($format:literal)*) => (concat!($head, $("/", $format),*));
@@ -270,9 +284,10 @@ macro_rules! path {
 			type Params = <$crate::Product!($($bty),*) as $crate::Combine<<$($parent)*<'a> as $crate::Path>::Params>>::Output;
 		}
 		impl<'a> $name<'a> {
-			#[cfg(feature = "warp")]
-			pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($($ty,)*), Error = $crate::warp::Rejection> + Clone {
-				$crate::path_filter!($($original_input)*)
+			$crate::if_warp! {
+				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($($ty,)*), Error = $crate::warp::Rejection> + Clone {
+					$crate::path_filter!($($original_input)*)
+				}
 			}
 			#[allow(dead_code)]
 			pub(self) fn local(params: <<$crate::Product!($($bty),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple) -> impl $crate::Display {
