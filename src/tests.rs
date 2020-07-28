@@ -2,7 +2,7 @@
 
 #[test]
 fn simple() {
-	crate::path!(A: (parent: crate::RootPath) / "test" / (user: i64) / (item: i32));
+	crate::path!(A: (parent: crate::RootPath) / "test" / (user: i64) / (item: i32) / ..);
 	crate::path!(B: (parent: A) / "o" / (b: bool) / (uu: char));
 	crate::path!(C: (parent: crate::RootPath) / "c");
 
