@@ -11,7 +11,7 @@ mod tests;
 
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
-pub struct Product<H, T: HList>(pub(crate) H, pub(crate) T);
+pub struct Product<H, T: HList>(pub H, pub T);
 
 #[doc(hidden)]
 #[derive(Clone, Copy)]
