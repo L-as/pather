@@ -1,13 +1,15 @@
 #[doc(hidden)]
-pub use core::fmt::Display;
+pub use std::fmt::Display;
 #[doc(hidden)]
-pub use core::marker::PhantomData;
+pub use std::marker::PhantomData;
 #[cfg(feature = "warp")]
 #[doc(hidden)]
 pub use warp;
 
 #[cfg(test)]
 mod tests;
+
+pub mod helpers;
 
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
@@ -112,6 +114,7 @@ impl Tuple for () {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! product {
+	() => { $crate::HNil };
 	($H:expr) => { $crate::Product($H, $crate::HNil) };
 	($H:expr, $($T:expr),*) => { $crate::Product($H, $crate::product!($($T),*)) };
 }
@@ -213,7 +216,8 @@ macro_rules! path_filter {
 		$crate::warp::path(__StaticPath)
 	});
 	(@segment ($next:ident : $ty:path)) => (
-		$crate::warp::path::param::<$ty>()
+		// FIXME: does this do percent decoding?
+		(warp::Filter::and_then($crate::warp::path::param::<String>(), |x: String| {async move {<$ty as $crate::TextualSerde>::deserialize(&x).map_err(|_| $crate::warp::reject::not_found())}}))
 	);
 	($next:tt) => (
 		$crate::warp::Filter::and($crate::path_filter!(@segment $next), $crate::warp::path::end())
@@ -237,8 +241,66 @@ impl<'a> Path for RootPath<'a> {
 	type Params = HNil;
 }
 #[allow(non_snake_case)]
-pub fn RootPath<'a>(_params: <<<RootPath<'a> as Path>::Params as ReverseInto<HNil>>::Output as HList>::Tuple) -> impl Display {
-	""
+pub fn RootPath<'a>(_params: <<<RootPath<'a> as Path>::Params as ReverseInto<HNil>>::Output as HList>::Tuple) -> String {
+	String::new()
+}
+
+use std::{
+	borrow::{Borrow, ToOwned},
+	fmt::Write,
+	str::FromStr,
+};
+
+pub trait TextualSerde {
+	type A;
+	type B: ?Sized;
+	type Err;
+	fn serialize(x: &Self::B, out: &mut String);
+	fn deserialize(s: &str) -> Result<Self::A, Self::Err>;
+	fn circular(x: &Self::A) -> &Self::B;
+}
+
+pub struct NoClone<T> {
+	_marker: PhantomData<T>,
+}
+
+impl<T: Display + FromStr> TextualSerde for NoClone<T> {
+	type A = T;
+	type B = T;
+	type Err = <Self::A as FromStr>::Err;
+	fn serialize(x: &Self::B, out: &mut String) {
+		// FIXME: This is inefficient, but I am not sure there is a better way.
+		// The entire std::fmt module honestly just seems like bad design. but
+		// maybe there still is a way to bypass the whole formatting/arguments
+		// shenanigans.
+		// Same problem exists below.
+		write!(out, "{}", x).expect("std::fmt::Display::fmt failed")
+	}
+	fn deserialize(s: &str) -> Result<Self::A, Self::Err> {
+		Self::A::from_str(s)
+	}
+	fn circular(x: &Self::A) -> &Self::B {
+		x.borrow()
+	}
+}
+
+impl<B: Display + ?Sized + ToOwned> TextualSerde for B
+where
+	<B as ToOwned>::Owned: FromStr,
+{
+	type A = <B as ToOwned>::Owned;
+	type B = B;
+	type Err = <Self::A as FromStr>::Err;
+	fn serialize(x: &Self::B, out: &mut String) {
+		// FIXME: same problem as above
+		write!(out, "{}", x).expect("std::fmt::Display::fmt failed")
+	}
+	fn deserialize(s: &str) -> Result<Self::A, Self::Err> {
+		Self::A::from_str(s)
+	}
+	fn circular(x: &Self::A) -> &Self::B {
+		x.borrow()
+	}
 }
 
 #[doc(hidden)]
@@ -257,56 +319,81 @@ macro_rules! if_warp {
 
 #[macro_export]
 macro_rules! path {
-	(@genformat $head:literal $($format:literal)*) => (concat!($head, $("/", $format),*));
 	(@conv [$head:ty $(,$tail:ty)*] [$expr:expr]) => {
 		$crate::path!(@conv [$($tail),*] [($expr).1])
 	};
 	(@conv [] [$expr:expr]) => {
 		($expr)
 	};
-	(format [$($format:tt)*] [$($parent:expr)?] [$($exprs:expr),*] [$head:ty $(,$tail:ty)*] [$expr:expr]) => {
-		$crate::path!(format [$($format)*] [$($parent)?] [($expr).0 $(,$exprs)*] [$($tail),*] [($expr).1])
+	(@revslice [$head:ty $(,$tail:ty)*] [$($result:expr),*] [$expr:expr]) => {
+		$crate::path!(@revslice [$($tail),*] [($expr).0 $(,$result)*] [($expr).1])
 	};
-	(format [$($format:tt)*] [$($parent:expr)?] [$($exprs:expr),*] [] [$expr:expr]) => {
-		format!($($format)*, $($parent,)? $($exprs),*)
+	(@revslice [] [$($result:expr),*] [$expr:expr]) => {
+		$crate::product!($($result),*)
 	};
-	(@munch [$($state:tt)*] [$($format:literal)*] [$($bty:ty),*] [$($ty:ty),*] [$head:literal $(,$tail:tt)*]) => (
-		$crate::path!(@munch [$($state)*] [$($format)* $head] [$($bty),*] [$($ty),*] [$($tail),*]);
+	(@format [$e:ident] [$s:expr] / $($tail:tt)*) => ($crate::path!(@format [$e] [$s] $($tail)*));
+	(@format [$e:ident] [$s:expr] @segment $next:literal) => ({
+		$s.push_str($next);
+	});
+	(@format [$e:ident] [$s:expr] @segment ($next:ident : $ty:ty)) => (
+		// FIXME: do percent-encoding
+		<$ty as $crate::TextualSerde>::serialize($e.0, &mut $s);
+		#[allow(unused_variables)]
+		let $e = $e.1;
 	);
-	(@munch [$($state:tt)*] [$($format:literal)*] [$($bty:ty),*] [$($ty:ty),*] [($head:ident: $headty:ty) $(,$tail:tt)*]) => (
-		$crate::path!(@munch [$($state)*] [$($format)* "{}"] [&'a $headty $(,$bty)*] [$($ty,)* $headty] [$($tail),*]);
+	(@format [$e:ident] [$s:expr] $next:tt $(/ ..)?) => (
+		$crate::path!(@format [$e] [$s] @segment $next);
 	);
-	(@munch [$name:ident [$($parent:tt)*] [$($original_input:tt)*]] [$($format:literal)*] [$($bty:ty),*] [$($ty:ty),*] [$(..)?]) => (
-		pub struct $name<'a> {
+	(@format [$e:ident] [$s:expr] $next:tt / $nextnext:tt $(/ $tail:tt)*) => (
+		$crate::path!(@format [$e] [$s] @segment $next);
+		$s.push('/');
+		$crate::path!(@format [$e] [$s] $nextnext $(/ $tail)*);
+	);
+	(@munch [$($state:tt)*] [$($format:literal)*] [$($tyrev:ty),*] [$($ty:ty),*] [$head:literal $(,$tail:tt)*]) => (
+		$crate::path!(@munch [$($state)*] [$($format)* $head] [$($tyrev),*] [$($ty),*] [$($tail),*]);
+	);
+	(@munch [$($state:tt)*] [$($format:literal)*] [$($tyrev:ty),*] [$($ty:ty),*] [($head:ident: $headty:ty) $(,$tail:tt)*]) => (
+		$crate::path!(@munch [$($state)*] [$($format)* "{}"] [$headty $(,$tyrev)*] [$($ty,)* $headty] [$($tail),*]);
+	);
+	(@munch [$vis:vis $name:ident [$($parent:tt)*] [$($original_input:tt)*]] [$($format:literal)*] [$($tyrev:ty),*] [$($ty:ty),*] [$(..)?]) => (
+		$vis struct $name<'a> {
 			_marker: $crate::PhantomData<&'a ()>,
 		}
 		impl<'a> $crate::Path for $name<'a> {
-			type Params = <$crate::Product!($($bty),*) as $crate::Combine<<$($parent)*<'a> as $crate::Path>::Params>>::Output;
+			type Params = <<$crate::Product!($(&'a <$ty as crate::TextualSerde>::B),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::Combine<<$($parent)*<'a> as $crate::Path>::Params>>::Output;
 		}
 		impl<'a> $name<'a> {
 			$crate::if_warp! {
-				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($($ty,)*), Error = $crate::warp::Rejection> + Clone {
+				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($(<$ty as crate::TextualSerde>::A,)*), Error = $crate::warp::Rejection> + Clone {
 					$crate::path_filter!($($original_input)*)
 				}
 			}
 			#[allow(dead_code)]
-			pub(self) fn local(params: <<$crate::Product!($($bty),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple) -> impl $crate::Display {
+			pub(self) fn local(params: <$crate::Product!($(&'a <$ty as crate::TextualSerde>::B),*) as $crate::HList>::Tuple) -> String {
 				#[allow(unused_variables)]
-				let params = $crate::ReverseInto::reverse_into($crate::Tuple::hlist(params), $crate::HNil);
-				$crate::path!(format [$crate::path!(@genformat $($format)*)] [] [] [$($bty),*] [params])
+				let params = $crate::Tuple::hlist(params);
+				let mut s = String::new();
+				$crate::path!(@format [params] [s] $($original_input)*);
+				s
 			}
 		}
 		#[allow(non_snake_case)]
-		pub fn $name<'a>(params: <<<$name<'a> as $crate::Path>::Params as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple) -> impl $crate::Display {
+		$vis fn $name<'a>(params: <<<$name<'a> as $crate::Path>::Params as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple) -> String {
 			let params: <$name<'a> as $crate::Path>::Params = $crate::ReverseInto::reverse_into($crate::Tuple::hlist(params), $crate::HNil);
-			let parent_params: <$($parent)*<'a> as $crate::Path>::Params = $crate::path!(@conv [$($bty),*] [params]);
+			let parent_params: <$($parent)*<'a> as $crate::Path>::Params = $crate::path!(@conv [$($ty),*] [params]);
 			let parent_params: <<<$($parent)*<'a> as $crate::Path>::Params as $crate::ReverseInto<$crate::HNil>>::Output as $crate::HList>::Tuple = $crate::HList::flatten($crate::ReverseInto::reverse_into(parent_params, $crate::HNil));
-			let parent = ($($parent)*)(parent_params);
-			$crate::path!(format [concat!("{}/", $crate::path!(@genformat $($format)*))] [parent] [] [$($bty),*] [params])
+			#[allow(unused_mut)]
+			let mut s = ($($parent)*)(parent_params);
+			s.reserve(32); // TODO: make this dependent on the input
+			s.push('/');
+			#[allow(unused_variables)]
+			let params = $crate::path!(@revslice [$($ty),*] [] [params]);
+			$crate::path!(@format [params] [s] $($original_input)*);
+			s
 		}
 	);
 
-	($name:ident: (parent: $($parent:tt)*) $(/ $path:tt)*) => (
-		$crate::path!(@munch [$name [$($parent)*] [$(/ $path)*]] [] [] [] [$($path),*]);
+	($vis:vis $name:ident: (parent: $($parent:tt)*) $(/ $path:tt)*) => (
+		$crate::path!(@munch [$vis $name [$($parent)*] [$(/ $path)*]] [] [] [] [$($path),*]);
 	);
 }
