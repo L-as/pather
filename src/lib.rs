@@ -360,16 +360,16 @@ macro_rules! path {
 			_marker: $crate::PhantomData<&'a ()>,
 		}
 		impl<'a> $crate::Path for $name<'a> {
-			type Params = <<$crate::Product!($(&'a <$ty as crate::TextualSerde>::B),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::Combine<<$($parent)*<'a> as $crate::Path>::Params>>::Output;
+			type Params = <<$crate::Product!($(&'a <$ty as $crate::TextualSerde>::B),*) as $crate::ReverseInto<$crate::HNil>>::Output as $crate::Combine<<$($parent)*<'a> as $crate::Path>::Params>>::Output;
 		}
 		impl<'a> $name<'a> {
 			$crate::if_warp! {
-				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($(<$ty as crate::TextualSerde>::A,)*), Error = $crate::warp::Rejection> + Clone {
+				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($(<$ty as $crate::TextualSerde>::A,)*), Error = $crate::warp::Rejection> + Clone {
 					$crate::path_filter!($($original_input)*)
 				}
 			}
 			#[allow(dead_code)]
-			pub(self) fn local(params: <$crate::Product!($(&'a <$ty as crate::TextualSerde>::B),*) as $crate::HList>::Tuple) -> String {
+			pub(self) fn local(params: <$crate::Product!($(&'a <$ty as $crate::TextualSerde>::B),*) as $crate::HList>::Tuple) -> String {
 				#[allow(unused_variables)]
 				let params = $crate::Tuple::hlist(params);
 				let mut s = String::new();
