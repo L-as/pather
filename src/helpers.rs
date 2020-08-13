@@ -17,17 +17,17 @@ where
 {
 	type A = <T as ToOwned>::Owned;
 	type B = T;
-	type Err = Result<base64::DecodeError, bincode::Error>;
+	type Err = Result<data_encoding::DecodeError, bincode::Error>;
 	fn serialize(x: &Self::B, out: &mut String) {
 		// TODO: this allocation can be avoided by serializing directly into base64,
 		// but that would require a lot more time to implement, since it would be on the
 		// same scale as bincode.
-		let serialized = bincode::serialize(x).expect("Could not serialize with bincode");
-		base64::encode_config_buf(serialized, base64::URL_SAFE_NO_PAD, out);
+		let serialized = bincode::serialize(x).expect("Could not serialize with bincode; this isn't supposed to happen");
+		data_encoding::BASE64URL_NOPAD.encode_append(serialized.as_slice(), out)
 	}
 	fn deserialize(s: &str) -> Result<Self::A, Self::Err> {
-		let serialized = base64::decode_config(s, base64::URL_SAFE_NO_PAD).unwrap();
-		Ok(bincode::deserialize(&serialized).unwrap())
+		let serialized = data_encoding::BASE64URL_NOPAD.decode(s.as_bytes()).map_err(Ok)?;
+		Ok(bincode::deserialize(&serialized).map_err(Err)?)
 	}
 	fn circular(x: &Self::A) -> &Self::B {
 		x.borrow()
