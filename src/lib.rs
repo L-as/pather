@@ -364,12 +364,12 @@ macro_rules! path {
 		}
 		impl<'a> $name<'a> {
 			$crate::if_warp! {
-				pub(self) fn filter() -> impl $crate::warp::Filter<Extract = ($(<$ty as $crate::TextualSerde>::A,)*), Error = $crate::warp::Rejection> + Clone {
+				pub fn filter() -> impl $crate::warp::Filter<Extract = ($(<$ty as $crate::TextualSerde>::A,)*), Error = $crate::warp::Rejection> + Clone {
 					$crate::path_filter!($($original_input)*)
 				}
 			}
 			#[allow(dead_code)]
-			pub(self) fn local(params: <$crate::Product!($(&'a <$ty as $crate::TextualSerde>::B),*) as $crate::HList>::Tuple) -> String {
+			pub fn local(params: <$crate::Product!($(&'a <$ty as $crate::TextualSerde>::B),*) as $crate::HList>::Tuple) -> String {
 				#[allow(unused_variables)]
 				let params = $crate::Tuple::hlist(params);
 				let mut s = String::new();
